@@ -582,6 +582,7 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
         { "Y800",      1, 1, 1, 1, 0, { 0, 9, 9, 9 }, pfGray8,     write_planar_frame  },
         { "GRAY",      1, 1, 1, 1, 0, { 0, 9, 9, 9 }, pfGray8,     write_planar_frame  },
         { "GRAY16",    1, 1, 1, 2, 0, { 0, 9, 9, 9 }, pfGray16,    write_planar_frame  },
+        { "GRAYS",     1, 1, 1, 4, 0, { 0, 9, 9, 9 }, pfGrayS,     write_planar_frame  },
         { "YV411",     4, 1, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV444P8,  write_planar_frame  },
         { "YUV411P8",  4, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV411P8,  write_planar_frame  },
         { "YUV9",      4, 4, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV410P8,  write_planar_frame  },
