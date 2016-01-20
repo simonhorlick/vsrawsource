@@ -78,10 +78,16 @@ static const char *open_source_file(rs_hnd_t *rh, const char *src_name)
     return "source does not exist.";
     }
 
+    // if file is a pipe, give it negative size as an indicator
     if (st.st_size == 0) {
-        return "failed to get file size.";
+        if (S_ISFIFO(st.st_mode))
+            rh->file_size = -1;
+        else
+            return "failed to get file size.";
     }
-    rh->file_size = st.st_size;
+    else
+        rh->file_size = st.st_size;
+
 #ifdef _WIN32
     rh->file = _wfopen(tmp, L"rb");
 #else
@@ -446,10 +452,11 @@ static int VS_CC check_y4m(rs_hnd_t *rh)
     char buff[256] = { 0 };
     char ctag[32] = { 0 };
 
-    fread(buff, 1, sizeof buff, rh->file);
-    if (strncmp(buff, stream_header, sh_length) != 0) {
+    if (buff != fgets(buff, sizeof(buff), rh->file))
         return 1;
-    }
+
+    if (strncmp(buff, stream_header, sh_length) != 0)
+        return 1;
 
     int i;
     for (i = sh_length; buff[i] != '\n'; i++) {
@@ -490,11 +497,6 @@ static int VS_CC check_y4m(rs_hnd_t *rh)
     }
 
     rh->off_header = ++i;
-
-    if (strncmp(buff + i, frame_header, strlen(frame_header)) != 0) {
-        return -2;
-    }
-
     rh->off_frame = fh_length;
 
     if (strlen(rh->src_format) == 0) {
@@ -517,15 +519,20 @@ static int check_bmp(rs_hnd_t *rh)
 {
     uint32_t offset_data;
     bmp_info_header_t info = { 0 };
+    char head[10];
 
-    fseek(rh->file, 10, SEEK_SET);
-    fread(&offset_data, 1, sizeof(uint32_t), rh->file);
-    fread(&info, 1, sizeof(bmp_info_header_t), rh->file);
+    if (sizeof(head) != fread(head, 1, sizeof(head), rh->file))
+        return 1;
+
+    if (sizeof(uint32_t) != fread(&offset_data, 1, sizeof(uint32_t), rh->file))
+        return 1;
+
+    if (sizeof(bmp_info_header_t) != fread(&info, 1, sizeof(bmp_info_header_t), rh->file))
+        return 1;
 
     if (info.num_planes != 1 || info.fourcc != 0 ||
-        (info.bits_per_pixel != 24 && info.bits_per_pixel != 32)) {
+        (info.bits_per_pixel != 24 && info.bits_per_pixel != 32))
         return 1;
-    }
 
     rh->vi[0].width = abs_i(info.width);
     rh->vi[0].height = abs_i(info.height);
@@ -539,17 +546,21 @@ static int check_bmp(rs_hnd_t *rh)
 
 static int check_header(rs_hnd_t *rh)
 {
-    char head[2];
-    fread(head, 1, 2, rh->file);
-    fseek(rh->file, 0, SEEK_SET);
+    // for pipes to work we can't seek; read the first 2 bytes and put back
+    // note: bmp only gives 2 bytes magic, no point in doing more
+    char head[3] = {0};
 
-    if (head[0] == 'B' && head[1] == 'M') {
+    head[0] = fgetc(rh->file);
+    head[1] = fgetc(rh->file);
+
+    ungetc(head[1], rh->file);
+    ungetc(head[0], rh->file);
+
+    if (strncmp("BM", head, 2) == 0)
         return check_bmp(rh);
-    }
 
-    if (head[0] == 'Y' && head[1] == 'U') {
+    if (strncmp("YU", head, 2) == 0)
         return check_y4m(rh);
-    }
 
     return 1;
 }
@@ -708,15 +719,24 @@ rs_get_frame(int n, int activation_reason, void **instance_data,
 
     rs_hnd_t *rh = (rs_hnd_t *)*instance_data;
 
-    int frame_number = n;
-    if (n >= rh->vi[0].numFrames) {
-        frame_number = rh->vi[0].numFrames - 1;
+    if (rh->index) {
+        // file: seek to just after the frame header
+        int frame_number = n;
+        if (n >= rh->vi[0].numFrames)
+            frame_number = rh->vi[0].numFrames - 1;
+
+        if (rs_fseek(rh->file, rh->index[frame_number], SEEK_SET) != 0)
+            return NULL;
+    }
+    else if (rh->off_frame > 0) {
+        // pipe: read off frame header and discard
+        // todo: non-sequential access check
+        if (rh->off_frame != fread(rh->frame_buff, 1, rh->off_frame, rh->file))
+            return NULL;
     }
 
-    if (rs_fseek(rh->file, rh->index[frame_number], SEEK_SET) != 0 ||
-        fread(rh->frame_buff, 1, rh->frame_size, rh->file) < rh->frame_size) {
-        return NULL;
-    }
+    if (fread(rh->frame_buff, 1, rh->frame_size, rh->file) < rh->frame_size)
+         return NULL;
 
     VSFrameRef *dst[2];
     dst[0] = vsapi->newVideoFrame(rh->vi[0].format, rh->vi[0].width, rh->vi[0].height,
@@ -836,11 +856,20 @@ create_source(const VSMap *in, VSMap *out, void *user_data, VSCore *core,
     const char *ca = check_args(rh, &va);
     RET_IF_ERROR(ca, "%s", ca);
 
-    rh->vi[0].numFrames =
-        (int)((rh->file_size - rh->off_header) / (rh->off_frame + rh->frame_size));
-    RET_IF_ERROR(rh->vi[0].numFrames < 1, "too small file size");
+    if (rh->file_size < 0)
+    {
+        // pipe: make the source "infinite"
+        rh->vi[0].numFrames = INT32_MAX;
+        rh->index = NULL;
+    }
+    else
+    {
+        rh->vi[0].numFrames =
+            (int)((rh->file_size - rh->off_header) / (rh->off_frame + rh->frame_size));
 
-    RET_IF_ERROR(create_index(rh), "failed to create index");
+        RET_IF_ERROR(rh->vi[0].numFrames < 1, "too small file size");
+        RET_IF_ERROR(create_index(rh), "failed to create index");
+    }
 
     rh->frame_buff = (uint8_t *)malloc(rh->frame_size + 32);
     RET_IF_ERROR(!rh->frame_buff, "failed to allocate buffer");
