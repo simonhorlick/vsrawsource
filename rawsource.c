@@ -28,6 +28,15 @@
 
 #define FORMAT_MAX_LEN 32
 
+#define LOG_PREFIX "raws: "
+
+#define VS_LOG(level, ...) \
+{\
+    char msg_buff[256]={0}; \
+    int len = snprintf(msg_buff, sizeof(msg_buff)-1, LOG_PREFIX); \
+    snprintf(msg_buff+len, sizeof(msg_buff)-1-len, __VA_ARGS__); \
+    vsapi->logMessage(level, msg_buff);\
+}
 
 typedef struct rs_hndle rs_hnd_t;
 typedef void (VS_CC *func_write_frame)(rs_hnd_t *, VSFrameRef **, const VSAPI *,
@@ -142,6 +151,12 @@ write_planar_frame(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
         row_size = vsapi->getFrameWidth(dst[0], plane) * bps;
         row_size = (row_size + rh->row_adjust) & (~rh->row_adjust);
         height = vsapi->getFrameHeight(dst[0], plane);
+
+        if ( ((int)(srcp - rh->frame_buff) + row_size*height) > rh->frame_size) {
+            VS_LOG(mtCritical, "write_planar_frame: buffer overflow, check format parameters");
+            return;
+        }
+
         rs_bit_blt(srcp, row_size, height, dst[0], plane, vsapi);
         srcp += row_size * height;
     }
@@ -411,27 +426,36 @@ static inline const char * VS_CC get_format(char *ctag)
         char *tag;
         char *format;
     } table[] = {
+        { "420",      "YUV420P8"  },
         { "420jpeg",  "YUV420P8"  },
         { "420mpeg2", "YUV420P8"  },
         { "420paldv", "YUV420P8"  },
         { "420p9",    "YUV420P9"  },
         { "420p10",   "YUV420P10" },
         { "420p16",   "YUV420P16" },
+        { "410",      "YUV410P8"  },
         { "411",      "YUV411P8"  },
         { "422",      "YUV422P8"  },
         { "422p9",    "YUV422P9"  },
         { "422p10",   "YUV422P10" },
         { "422p16",   "YUV422P16" },
+        { "440",      "YUV440P8"  },
         { "444",      "YUV444P8"  },
         { "444p9",    "YUV444P9"  },
         { "444p10",   "YUV444P10" },
         { "444p16",   "YUV444P16" },
         { "444alpha", "YUV444P8A" },
-        { ctag,       "YUV420P8"  }
+        { "444p32",   "YUV444P32" },
+        { "mono",     "GRAY"      },
+        { "mono16",   "GRAY16"    },
+        { "mono32",   "GRAYS"     },
+        { ctag,       ""  }
     };
 
     int i = 0;
-    while (strcasecmp(ctag, table[i].tag) != 0) i++;
+    while (strcasecmp(ctag, table[i].tag) != 0)
+        i++;
+
     return table[i].format;
 }
 
@@ -443,7 +467,7 @@ static inline const char * VS_CC get_format(char *ctag)
         return -1;\
     }\
 }
-static int VS_CC check_y4m(rs_hnd_t *rh)
+static int VS_CC check_y4m(rs_hnd_t *rh, const VSAPI *vsapi)
 {
     const char *stream_header = "YUV4MPEG2";
     const char *frame_header = "FRAME\n";
@@ -490,6 +514,9 @@ static int VS_CC check_y4m(rs_hnd_t *rh)
             i += 2;
             sscanf(buff + i, "%s", ctag);
             strcpy(rh->src_format, get_format(ctag));
+
+            if (strlen(rh->src_format) == 0)
+                VS_LOG(mtWarning, "check_y4m: unknown frame format in y4m header: %s", ctag);
         }
         if (i == sizeof buff - 1) {
             return -2;
@@ -500,6 +527,7 @@ static int VS_CC check_y4m(rs_hnd_t *rh)
     rh->off_frame = fh_length;
 
     if (strlen(rh->src_format) == 0) {
+        VS_LOG(mtWarning, "check_y4m: assuming the format is YUV420P8");
         strcpy(rh->src_format, "YUV420P8");
     }
 
@@ -515,7 +543,7 @@ static inline int32_t abs_i(int32_t i)
 }
 
 
-static int check_bmp(rs_hnd_t *rh)
+static int check_bmp(rs_hnd_t *rh, const VSAPI *vsapi)
 {
     uint32_t offset_data;
     bmp_info_header_t info = { 0 };
@@ -544,7 +572,7 @@ static int check_bmp(rs_hnd_t *rh)
 }
 
 
-static int check_header(rs_hnd_t *rh)
+static int check_header(rs_hnd_t *rh, const VSAPI *vsapi)
 {
     // for pipes to work we can't seek; read the first 2 bytes and put back
     // note: bmp only gives 2 bytes magic, no point in doing more
@@ -557,10 +585,10 @@ static int check_header(rs_hnd_t *rh)
     ungetc(head[0], rh->file);
 
     if (strncmp("BM", head, 2) == 0)
-        return check_bmp(rh);
+        return check_bmp(rh, vsapi);
 
     if (strncmp("YU", head, 2) == 0)
-        return check_y4m(rh);
+        return check_y4m(rh, vsapi);
 
     return 1;
 }
@@ -604,12 +632,13 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
         { "YUV420P9",  2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV420P9,  write_planar_frame  },
         { "YUV420P10", 2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV420P10, write_planar_frame  },
         { "YUV420P16", 2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV420P16, write_planar_frame  },
-        { "YUV422P9",  2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV422P9,  write_planar_frame  },
-        { "YUV422P10", 2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV422P10, write_planar_frame  },
-        { "YUV422P16", 2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV422P16, write_planar_frame  },
-        { "YUV444P9",  2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV444P9,  write_planar_frame  },
-        { "YUV444P10", 2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV444P10, write_planar_frame  },
-        { "YUV444P16", 2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV444P16, write_planar_frame  },
+        { "YUV422P9",  2, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV422P9,  write_planar_frame  },
+        { "YUV422P10", 2, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV422P10, write_planar_frame  },
+        { "YUV422P16", 2, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV422P16, write_planar_frame  },
+        { "YUV444P9",  1, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV444P9,  write_planar_frame  },
+        { "YUV444P10", 1, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV444P10, write_planar_frame  },
+        { "YUV444P16", 1, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV444P16, write_planar_frame  },
+        { "YUV444P32", 1, 1, 4, 4, 0, { 0, 1, 2, 9 }, pfYUV444PS,  write_planar_frame  },
         { "YUV444P8A", 1, 1, 4, 1, 1, { 0, 1, 2, 3 }, pfYUV444P8,  write_planar_frame  },
         { "YUY2",      2, 1, 1, 4, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
         { "YUYV",      2, 1, 1, 4, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
@@ -658,7 +687,7 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
     for (int p = 0; p < table[i].num_planes; p++) {
         int width_plane =
             (rh->vi[0].width / (p ? table[i].subsample_h : 1)) << (table[i].num_planes == 2 && p ? 1 : 0);
-        int height_plane = rh->vi[0].height / (p ? table[i].subsample_h : 1);
+        int height_plane = rh->vi[0].height / (p ? table[i].subsample_v : 1);
         int row_size_plane =
             (width_plane * table[i].bytes_per_row_sample + rh->row_adjust) & (~rh->row_adjust);
         frame_size += row_size_plane * height_plane;
@@ -826,7 +855,7 @@ create_source(const VSMap *in, VSMap *out, void *user_data, VSCore *core,
         open_source_file(rh, vsapi->propGetData(in, "source", 0, 0));
     RET_IF_ERROR(err, "%s", err);
 
-    int header = check_header(rh);
+    int header = check_header(rh, vsapi);
     RET_IF_ERROR(header == -1, "invalid YUV4MPEG2 header was found");
     RET_IF_ERROR(header == -2, "unsupported YUV4MPEG2 header was found");
 
