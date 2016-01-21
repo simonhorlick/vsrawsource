@@ -2,7 +2,6 @@
 *.dll
 *.so
 *.py
-*.vpy
 *.avs
 *.raw
 *.yuv
