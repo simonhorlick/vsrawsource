@@ -3,9 +3,12 @@
 
   This file is a part of vsrawsource
 
-  Copyright (C) 2012  Oka Motofumi
+  Copyright (C) 2016  Oka Motofumi et al
 
-  Author: Oka Motofumi (chikuzen.mo at gmail dot com)
+  Authors: Oka Motofumi (chikuzen.mo at gmail dot com)
+           Skylar Moore (github.com/IFeelBloated)
+           Fredrik Mellbin (github.com/myrsloik)
+           Darrell Walisser (my.name at gmail dot com)
 
   This program is free software; you can redistribute it and/or
   modify it under the terms of the GNU Lesser General Public
@@ -596,6 +599,8 @@ static int check_header(rs_hnd_t *rh, const VSAPI *vsapi)
 
 static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
 {
+    const VSAPI* vsapi = va->vsapi;
+
     const struct {
         char *format_name;
         int subsample_h;
@@ -609,40 +614,51 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
     } table[] = {
         { "YUV9",      4, 4, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV410P8,  write_planar_frame  },
         { "YVU9",      4, 4, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV410P8,  write_planar_frame  },
+        { "YUV410P",   4, 4, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV410P8,  write_planar_frame  },
         { "YUV410P8",  4, 4, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV410P8,  write_planar_frame  },
 
+        { "YUV411P",   4, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV411P8,  write_planar_frame  },
         { "YUV411P8",  4, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV411P8,  write_planar_frame  },
         { "YV411",     4, 1, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV444P8,  write_planar_frame  },
 
         { "i420",      2, 2, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV420P8,  write_planar_frame  },
         { "IYUV",      2, 2, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV420P8,  write_planar_frame  },
         { "YV12",      2, 2, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV420P8,  write_planar_frame  },
+        { "YUV420P",   2, 2, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV420P8,  write_planar_frame  },
         { "YUV420P8",  2, 2, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV420P8,  write_planar_frame  },
         { "YUV420P9",  2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV420P9,  write_planar_frame  },
         { "YUV420P10", 2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV420P10, write_planar_frame  },
         { "YUV420P16", 2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV420P16, write_planar_frame  },
 
+        // nv16, nv20
         { "NV12",      2, 2, 2, 1, 0, { 0, 1, 2, 9 }, pfYUV420P8,  write_nvxx_frame    },
         { "NV21",      2, 2, 2, 1, 0, { 0, 2, 1, 9 }, pfYUV420P8,  write_nvxx_frame    },
         { "P010",      2, 2, 2, 2, 0, { 0, 1, 2, 9 }, pfYUV420P16, write_px1x_frame    },
         { "P016",      2, 2, 2, 2, 0, { 0, 1, 2, 9 }, pfYUV420P16, write_px1x_frame    },
 
-        { "YUY2",      2, 1, 1, 4, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
-        { "YUYV",      2, 1, 1, 4, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
-        { "YVYU",      2, 1, 1, 4, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
-        { "UYVY",      2, 1, 1, 4, 0, { 1, 0, 2, 0 }, pfYUV422P8,  write_packed_yuv422 },
-        { "VYUY",      2, 1, 1, 4, 0, { 2, 0, 1, 0 }, pfYUV422P8,  write_packed_yuv422 },
+        { "YUY2",      2, 2, 1, 2, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
+        { "YUYV",      2, 2, 1, 2, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
+        { "YUYV422",   2, 2, 1, 2, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
+        { "YVYU",      2, 2, 1, 2, 0, { 0, 2, 0, 1 }, pfYUV422P8,  write_packed_yuv422 },
+        { "YVYU422",   2, 2, 1, 2, 0, { 0, 2, 0, 1 }, pfYUV422P8,  write_packed_yuv422 },
+        { "UYVY",      2, 2, 1, 2, 0, { 1, 0, 2, 0 }, pfYUV422P8,  write_packed_yuv422 },
+        { "UYVY422",   2, 2, 1, 2, 0, { 1, 0, 2, 0 }, pfYUV422P8,  write_packed_yuv422 },
+        { "VYUY",      2, 2, 1, 2, 0, { 2, 0, 1, 0 }, pfYUV422P8,  write_packed_yuv422 },
+        { "VYUY422",   2, 2, 1, 2, 0, { 2, 0, 1, 0 }, pfYUV422P8,  write_packed_yuv422 },
 
         { "P210",      2, 1, 2, 2, 0, { 0, 1, 2, 9 }, pfYUV422P16, write_px1x_frame    },
         { "P216",      2, 1, 2, 2, 0, { 0, 1, 2, 9 }, pfYUV422P16, write_px1x_frame    },
 
         { "i422",      2, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV422P8,  write_planar_frame  },
+        { "YUV422P",   2, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV422P8,  write_planar_frame  },
         { "YUV422P8",  2, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV422P8,  write_planar_frame  },
         { "YV16",      2, 1, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV422P8,  write_planar_frame  },
         { "YUV422P9",  2, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV422P9,  write_planar_frame  },
         { "YUV422P10", 2, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV422P10, write_planar_frame  },
         { "YUV422P16", 2, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV422P16, write_planar_frame  },
 
+
+        { "YUV440P",   1, 2, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV440P8,  write_planar_frame  },
         { "YUV440P8",  1, 2, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV440P8,  write_planar_frame  },
 
         { "Y8",        1, 1, 1, 1, 0, { 0, 9, 9, 9 }, pfGray8,     write_planar_frame  },
@@ -654,6 +670,7 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
 
         { "i444",      1, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV444P8,  write_planar_frame  },
         { "YV24",      1, 1, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV444P8,  write_planar_frame  },
+        { "YUV444P",   1, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV444P8,  write_planar_frame  },
         { "YUV444P8",  1, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV444P8,  write_planar_frame  },
         { "YUV444P9",  1, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV444P9,  write_planar_frame  },
         { "YUV444P10", 1, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV444P10, write_planar_frame  },
@@ -682,16 +699,17 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
     };
 
     int i = 0;
-    while (strcasecmp(rh->src_format, table[i].format_name) != 0) i++;
-    if (table[i].vsformat == 0) {
+    while (strcasecmp(rh->src_format, table[i].format_name) != 0)
+        i++;
+
+    if (table[i].vsformat == 0)
         return "unsupported format";
-    }
-    if (rh->vi[0].width % table[i].subsample_h != 0) {
+
+    if (rh->vi[0].width % table[i].subsample_h != 0)
         return "invalid width was specified";
-    }
-    if (rh->vi[0].height % table[i].subsample_v != 0) {
+
+    if (rh->vi[0].height % table[i].subsample_v != 0)
         return "invalid height was specified";
-    }
 
     int frame_size = 0;
     for (int p = 0; p < table[i].num_planes; p++) {
@@ -702,11 +720,15 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
             (width_plane * table[i].bytes_per_row_sample + rh->row_adjust) & (~rh->row_adjust);
         frame_size += row_size_plane * height_plane;
     }
+
     rh->frame_size = frame_size;
     rh->vi[0].format = va->vsapi->getFormatPreset(table[i].vsformat, va->core);
     memcpy(rh->order, table[i].order, sizeof(int) * 4);
     rh->write_frame = table[i].func;
     rh->has_alpha = table[i].has_alpha;
+
+    VS_LOG(mtDebug, "check_args: src_format=%s dst_format=%s width=%d height=%d frame_size=%d",
+        table[i].format_name, rh->vi[0].format->name, rh->vi[0].width, rh->vi[0].height, frame_size);
 
     return NULL;
 }
@@ -771,11 +793,17 @@ rs_get_frame(int n, int activation_reason, void **instance_data,
         // pipe: read off frame header and discard
         // todo: non-sequential access check
         if (rh->off_frame != fread(rh->frame_buff, 1, rh->off_frame, rh->file))
+        {
+            VS_LOG(mtWarning, "read frame header failed at frame %d", n);
             return NULL;
+        }
     }
 
     if (fread(rh->frame_buff, 1, rh->frame_size, rh->file) < rh->frame_size)
+    {
+         VS_LOG(mtWarning, "read frame failed at frame %d", n);
          return NULL;
+    }
 
     VSFrameRef *dst[2];
     dst[0] = vsapi->newVideoFrame(rh->vi[0].format, rh->vi[0].width, rh->vi[0].height,

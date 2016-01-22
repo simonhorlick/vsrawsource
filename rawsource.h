@@ -1,11 +1,14 @@
 /*
-  rawsource.h
+  rawsource.h: Raw Format Reader for VapourSynth
 
   This file is a part of vsrawsource
 
-  Copyright (C) 2012  Oka Motofumi
+  Copyright (C) 2016  Oka Motofumi et al
 
-  Author: Oka Motofumi (chikuzen.mo at gmail dot com)
+  Authors: Oka Motofumi (chikuzen.mo at gmail dot com)
+           Skylar Moore (github.com/IFeelBloated)
+           Fredrik Mellbin (github.com/myrsloik)
+           Darrell Walisser (my.name at gmail dot com)
 
   This program is free software; you can redistribute it and/or
   modify it under the terms of the GNU Lesser General Public
@@ -26,7 +29,7 @@
 #ifndef VS_RAW_SOURCE_H
 #define VS_RAW_SOURCE_H
 
-#define VS_RAWS_VERSION "0.3.1"
+#define VS_RAWS_VERSION "0.3.4"
 
 #ifdef _WIN32
 #ifdef __MINGW32__
