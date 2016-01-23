@@ -270,39 +270,25 @@ write_packed_rgb24(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
     uint8_t *dstp2_orig = vsapi->getWritePtr(dst[0], rh->order[2]);
     int dst_stride = vsapi->getStride(dst[0], 0);
 
-    // bmp pipe is usually going to be flipped
-    if (rh->flip_v)
-    {
-        for (int y = 0; y < height; y++) {
-            struct rgb24_t *srcp = (struct rgb24_t *)(srcp_orig + (height-y-1) * src_stride);
-            uint32_t *dstp0 = (uint32_t *)(dstp0_orig + y * dst_stride);
-            uint32_t *dstp1 = (uint32_t *)(dstp1_orig + y * dst_stride);
-            uint32_t *dstp2 = (uint32_t *)(dstp2_orig + y * dst_stride);
-            for (int x = 0; x < row_size; x++) {
-                dstp0[x] = bitor8to32(srcp[x].c[9], srcp[x].c[6],
-                                      srcp[x].c[3], srcp[x].c[0]);
-                dstp1[x] = bitor8to32(srcp[x].c[10], srcp[x].c[7],
-                                      srcp[x].c[4], srcp[x].c[1]);
-                dstp2[x] = bitor8to32(srcp[x].c[11], srcp[x].c[8],
-                                      srcp[x].c[5], srcp[x].c[2]);
-            }
-        }
-    }
-    else
-    {
-        for (int y = 0; y < height; y++) {
-            struct rgb24_t *srcp = (struct rgb24_t *)(srcp_orig + y * src_stride);
-            uint32_t *dstp0 = (uint32_t *)(dstp0_orig + y * dst_stride);
-            uint32_t *dstp1 = (uint32_t *)(dstp1_orig + y * dst_stride);
-            uint32_t *dstp2 = (uint32_t *)(dstp2_orig + y * dst_stride);
-            for (int x = 0; x < row_size; x++) {
-                dstp0[x] = bitor8to32(srcp[x].c[9], srcp[x].c[6],
-                                      srcp[x].c[3], srcp[x].c[0]);
-                dstp1[x] = bitor8to32(srcp[x].c[10], srcp[x].c[7],
-                                      srcp[x].c[4], srcp[x].c[1]);
-                dstp2[x] = bitor8to32(srcp[x].c[11], srcp[x].c[8],
-                                      srcp[x].c[5], srcp[x].c[2]);
-            }
+    for (int y = 0; y < height; y++) {
+
+        int yh = y;
+        if (rh->flip_v)
+           yh = height-y-1;
+
+        struct rgb24_t *srcp = (struct rgb24_t *)(srcp_orig + yh * src_stride);
+
+        uint32_t *dstp0 = (uint32_t *)(dstp0_orig + y * dst_stride);
+        uint32_t *dstp1 = (uint32_t *)(dstp1_orig + y * dst_stride);
+        uint32_t *dstp2 = (uint32_t *)(dstp2_orig + y * dst_stride);
+
+        for (int x = 0; x < row_size; x++) {
+            dstp0[x] = bitor8to32(srcp[x].c[9], srcp[x].c[6],
+                                  srcp[x].c[3], srcp[x].c[0]);
+            dstp1[x] = bitor8to32(srcp[x].c[10], srcp[x].c[7],
+                                  srcp[x].c[4], srcp[x].c[1]);
+            dstp2[x] = bitor8to32(srcp[x].c[11], srcp[x].c[8],
+                                  srcp[x].c[5], srcp[x].c[2]);
         }
     }
 }
@@ -327,7 +313,13 @@ write_packed_rgb48(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
     int stride = vsapi->getStride(dst[0], 0) >> 1;;
 
     for (int y = 0; y < height; y++) {
-        struct rgb48_t *srcp = (struct rgb48_t *)(srcp_orig + y * src_stride);
+
+        int yh = y;
+        if (rh->flip_v)
+           yh = height-y-1;
+
+        struct rgb48_t *srcp = (struct rgb48_t *)(srcp_orig + yh * src_stride);
+
         for (int x = 0; x < width; x++) {
             dstp0[x] = srcp[x].c[0];
             dstp1[x] = srcp[x].c[1];
@@ -365,43 +357,27 @@ write_packed_rgb32(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
     dstp[3] = (uint32_t *)vsapi->getWritePtr(dst[1], 0);
     int dst_stride = vsapi->getStride(dst[0], 0) >> 2;
 
-    if (rh->flip_v)
-    {
-        for (int y = 0; y < height; y++) {
-            struct rgb32_t *srcp = (struct rgb32_t *)(srcp_orig + (height-y-1) * src_stride);
-            for (int x = 0; x < row_size; x++) {
-                *(dstp[order[0]] + x) = bitor8to32(srcp[x].c[12], srcp[x].c[8],
-                                                   srcp[x].c[4], srcp[x].c[0]);
-                *(dstp[order[1]] + x) = bitor8to32(srcp[x].c[13], srcp[x].c[9],
-                                                   srcp[x].c[5], srcp[x].c[1]);
-                *(dstp[order[2]] + x) = bitor8to32(srcp[x].c[14], srcp[x].c[10],
-                                                   srcp[x].c[6], srcp[x].c[2]);
-                *(dstp[order[3]] + x) = bitor8to32(srcp[x].c[15], srcp[x].c[11],
-                                                   srcp[x].c[7], srcp[x].c[3]);
-            }
-            for (int i = 0; i < 4; i++) {
-                dstp[i] += dst_stride;
-            }
+
+    for (int y = 0; y < height; y++) {
+
+        int yh = y;
+        if (rh->flip_v)
+           yh = height-y-1;
+
+        struct rgb32_t *srcp = (struct rgb32_t *)(srcp_orig + yh * src_stride);
+
+        for (int x = 0; x < row_size; x++) {
+            *(dstp[order[0]] + x) = bitor8to32(srcp[x].c[12], srcp[x].c[8],
+                                               srcp[x].c[4], srcp[x].c[0]);
+            *(dstp[order[1]] + x) = bitor8to32(srcp[x].c[13], srcp[x].c[9],
+                                               srcp[x].c[5], srcp[x].c[1]);
+            *(dstp[order[2]] + x) = bitor8to32(srcp[x].c[14], srcp[x].c[10],
+                                               srcp[x].c[6], srcp[x].c[2]);
+            *(dstp[order[3]] + x) = bitor8to32(srcp[x].c[15], srcp[x].c[11],
+                                               srcp[x].c[7], srcp[x].c[3]);
         }
-    }
-    else
-    {
-        for (int y = 0; y < height; y++) {
-            struct rgb32_t *srcp = (struct rgb32_t *)(srcp_orig + y * src_stride);
-            for (int x = 0; x < row_size; x++) {
-                *(dstp[order[0]] + x) = bitor8to32(srcp[x].c[12], srcp[x].c[8],
-                                                   srcp[x].c[4], srcp[x].c[0]);
-                *(dstp[order[1]] + x) = bitor8to32(srcp[x].c[13], srcp[x].c[9],
-                                                   srcp[x].c[5], srcp[x].c[1]);
-                *(dstp[order[2]] + x) = bitor8to32(srcp[x].c[14], srcp[x].c[10],
-                                                   srcp[x].c[6], srcp[x].c[2]);
-                *(dstp[order[3]] + x) = bitor8to32(srcp[x].c[15], srcp[x].c[11],
-                                                   srcp[x].c[7], srcp[x].c[3]);
-            }
-            for (int i = 0; i < 4; i++) {
-                dstp[i] += dst_stride;
-            }
-        }
+        for (int i = 0; i < 4; i++)
+            dstp[i] += dst_stride;
     }
 }
 
