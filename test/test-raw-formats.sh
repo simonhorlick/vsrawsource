@@ -24,7 +24,7 @@
 #
 
 input="$1"
-numFrames=3
+numFrames=10
 numPass=0
 numFail=0
 threads=1
@@ -41,8 +41,8 @@ fi
 # be probed from a raw stream
 ffprobe -show_streams "$input" 2>/dev/null > "$input.info"
 
-width=`cat "$input.info" | grep coded_width | sed s/coded_width=//`
-height=`cat "$input.info"| grep coded_height | sed s/coded_height=//`
+width=`cat "$input.info" | grep ^width  | sed s/width=//`
+height=`cat "$input.info"| grep ^height | sed s/height=//`
 
 # test planar formats
 for fmt in \
@@ -106,8 +106,43 @@ do
             numFail=$(($numFail+1))
         fi
     )
-done 
-   
+done
+
+# test rgb formats w/bmp pipe
+# todo: test alpha channel in bgra
+for fmt in \
+    bgr24,gbrp bgra,gbrp
+do
+    (
+        IFS=',';
+        set -- $fmt;
+
+        packedFmt=$1
+        planarFmt=$2
+
+        echo -e \\n== $packedFmt =\> $planarFmt ===============================
+
+        # first pass, checksum the source clip w/o raws
+        srcSum=`ffmpeg -loglevel warning -i "$input" -frames $numFrames -pix_fmt $packedFmt -c:v bmp -f rawvideo - | \
+                ffmpeg -loglevel warning -i - -frames $numFrames -pix_fmt $planarFmt -f rawvideo - | 
+                openssl md5`
+
+        # second pass, same source clip piped through raws
+        echoSum=`ffmpeg -loglevel warning -i "$input" -frames $numFrames -pix_fmt $packedFmt -c:v bmp -f rawvideo - | \
+                vspipe --requests $threads --end $(($numFrames-1)) echo-bmp.vpy - | \
+                openssl md5`
+
+        if [ "$srcSum" = "$echoSum" ]; then
+            echo -e ${green}PASS${reset}
+            numPass=$(($numPass+1))
+        else
+            echo -e ${red}FAIL${reset}
+            numFail=$(($numFail+1))
+        fi
+    )
+done
+
+# todo: test rgb formats headerless
 
 
 echo $0 \| PASS $numPass \| FAIL $numFail
