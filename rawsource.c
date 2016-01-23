@@ -47,16 +47,18 @@ typedef void (VS_CC *func_write_frame)(rs_hnd_t *, VSFrameRef **, const VSAPI *,
 
 struct rs_hndle {
     FILE *file;
-    int64_t file_size;
-    uint32_t frame_size;
+    int64_t file_size;           // file size, for pipes it is -1
+    uint32_t frame_size;         // frame size in bytes
     char src_format[FORMAT_MAX_LEN];
-    int order[4];
-    int off_header;
-    int off_frame;
+    int order[4];                // order of planes/channels
+    int off_header;              // distance from start of file to first frame header
+    int off_frame;               // distance between frames in bytes
     int sar_num;
     int sar_den;
     int row_adjust;
     int has_alpha;
+    int flip_v;                  // source should be flipped vertically
+    int skip_first_frame_header; // first frame header was consumed in probe
     int64_t *index;
     uint64_t *total_pix;
     uint8_t *frame_buff;
@@ -268,18 +270,39 @@ write_packed_rgb24(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
     uint8_t *dstp2_orig = vsapi->getWritePtr(dst[0], rh->order[2]);
     int dst_stride = vsapi->getStride(dst[0], 0);
 
-    for (int y = 0; y < height; y++) {
-        struct rgb24_t *srcp = (struct rgb24_t *)(srcp_orig + y * src_stride);
-        uint32_t *dstp0 = (uint32_t *)(dstp0_orig + y * dst_stride);
-        uint32_t *dstp1 = (uint32_t *)(dstp1_orig + y * dst_stride);
-        uint32_t *dstp2 = (uint32_t *)(dstp2_orig + y * dst_stride);
-        for (int x = 0; x < row_size; x++) {
-            dstp0[x] = bitor8to32(srcp[x].c[9], srcp[x].c[6],
-                                  srcp[x].c[3], srcp[x].c[0]);
-            dstp1[x] = bitor8to32(srcp[x].c[10], srcp[x].c[7],
-                                  srcp[x].c[4], srcp[x].c[1]);
-            dstp2[x] = bitor8to32(srcp[x].c[11], srcp[x].c[8],
-                                  srcp[x].c[5], srcp[x].c[2]);
+    // bmp pipe is usually going to be flipped
+    if (rh->flip_v)
+    {
+        for (int y = 0; y < height; y++) {
+            struct rgb24_t *srcp = (struct rgb24_t *)(srcp_orig + (height-y-1) * src_stride);
+            uint32_t *dstp0 = (uint32_t *)(dstp0_orig + y * dst_stride);
+            uint32_t *dstp1 = (uint32_t *)(dstp1_orig + y * dst_stride);
+            uint32_t *dstp2 = (uint32_t *)(dstp2_orig + y * dst_stride);
+            for (int x = 0; x < row_size; x++) {
+                dstp0[x] = bitor8to32(srcp[x].c[9], srcp[x].c[6],
+                                      srcp[x].c[3], srcp[x].c[0]);
+                dstp1[x] = bitor8to32(srcp[x].c[10], srcp[x].c[7],
+                                      srcp[x].c[4], srcp[x].c[1]);
+                dstp2[x] = bitor8to32(srcp[x].c[11], srcp[x].c[8],
+                                      srcp[x].c[5], srcp[x].c[2]);
+            }
+        }
+    }
+    else
+    {
+        for (int y = 0; y < height; y++) {
+            struct rgb24_t *srcp = (struct rgb24_t *)(srcp_orig + y * src_stride);
+            uint32_t *dstp0 = (uint32_t *)(dstp0_orig + y * dst_stride);
+            uint32_t *dstp1 = (uint32_t *)(dstp1_orig + y * dst_stride);
+            uint32_t *dstp2 = (uint32_t *)(dstp2_orig + y * dst_stride);
+            for (int x = 0; x < row_size; x++) {
+                dstp0[x] = bitor8to32(srcp[x].c[9], srcp[x].c[6],
+                                      srcp[x].c[3], srcp[x].c[0]);
+                dstp1[x] = bitor8to32(srcp[x].c[10], srcp[x].c[7],
+                                      srcp[x].c[4], srcp[x].c[1]);
+                dstp2[x] = bitor8to32(srcp[x].c[11], srcp[x].c[8],
+                                      srcp[x].c[5], srcp[x].c[2]);
+            }
         }
     }
 }
@@ -342,20 +365,42 @@ write_packed_rgb32(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
     dstp[3] = (uint32_t *)vsapi->getWritePtr(dst[1], 0);
     int dst_stride = vsapi->getStride(dst[0], 0) >> 2;
 
-    for (int y = 0; y < height; y++) {
-        struct rgb32_t *srcp = (struct rgb32_t *)(srcp_orig + y * src_stride);
-        for (int x = 0; x < row_size; x++) {
-            *(dstp[order[0]] + x) = bitor8to32(srcp[x].c[12], srcp[x].c[8],
-                                               srcp[x].c[4], srcp[x].c[0]);
-            *(dstp[order[1]] + x) = bitor8to32(srcp[x].c[13], srcp[x].c[9],
-                                               srcp[x].c[5], srcp[x].c[1]);
-            *(dstp[order[2]] + x) = bitor8to32(srcp[x].c[14], srcp[x].c[10],
-                                               srcp[x].c[6], srcp[x].c[2]);
-            *(dstp[order[3]] + x) = bitor8to32(srcp[x].c[15], srcp[x].c[11],
-                                               srcp[x].c[7], srcp[x].c[3]);
+    if (rh->flip_v)
+    {
+        for (int y = 0; y < height; y++) {
+            struct rgb32_t *srcp = (struct rgb32_t *)(srcp_orig + (height-y-1) * src_stride);
+            for (int x = 0; x < row_size; x++) {
+                *(dstp[order[0]] + x) = bitor8to32(srcp[x].c[12], srcp[x].c[8],
+                                                   srcp[x].c[4], srcp[x].c[0]);
+                *(dstp[order[1]] + x) = bitor8to32(srcp[x].c[13], srcp[x].c[9],
+                                                   srcp[x].c[5], srcp[x].c[1]);
+                *(dstp[order[2]] + x) = bitor8to32(srcp[x].c[14], srcp[x].c[10],
+                                                   srcp[x].c[6], srcp[x].c[2]);
+                *(dstp[order[3]] + x) = bitor8to32(srcp[x].c[15], srcp[x].c[11],
+                                                   srcp[x].c[7], srcp[x].c[3]);
+            }
+            for (int i = 0; i < 4; i++) {
+                dstp[i] += dst_stride;
+            }
         }
-        for (int i = 0; i < 4; i++) {
-            dstp[i] += dst_stride;
+    }
+    else
+    {
+        for (int y = 0; y < height; y++) {
+            struct rgb32_t *srcp = (struct rgb32_t *)(srcp_orig + y * src_stride);
+            for (int x = 0; x < row_size; x++) {
+                *(dstp[order[0]] + x) = bitor8to32(srcp[x].c[12], srcp[x].c[8],
+                                                   srcp[x].c[4], srcp[x].c[0]);
+                *(dstp[order[1]] + x) = bitor8to32(srcp[x].c[13], srcp[x].c[9],
+                                                   srcp[x].c[5], srcp[x].c[1]);
+                *(dstp[order[2]] + x) = bitor8to32(srcp[x].c[14], srcp[x].c[10],
+                                                   srcp[x].c[6], srcp[x].c[2]);
+                *(dstp[order[3]] + x) = bitor8to32(srcp[x].c[15], srcp[x].c[11],
+                                                   srcp[x].c[7], srcp[x].c[3]);
+            }
+            for (int i = 0; i < 4; i++) {
+                dstp[i] += dst_stride;
+            }
         }
     }
 }
@@ -568,8 +613,21 @@ static int check_bmp(rs_hnd_t *rh, const VSAPI *vsapi)
     rh->vi[0].width = abs_i(info.width);
     rh->vi[0].height = abs_i(info.height);
     strcpy(rh->src_format, info.bits_per_pixel == 24 ? "BGR" : "BGRA");
-    rh->off_header = offset_data;
+    rh->off_header = 0;
+    rh->off_frame  = offset_data;
     rh->row_adjust = 4;
+    rh->flip_v = info.height > 0;   // +height means bmp is bottom-up, must be flipped
+    rh->skip_first_frame_header = 1;// don't re-read the header when the first frame is requested
+
+    // read what's left to get to the first frame (padding after header? - did not see in testing)
+    int remaining = offset_data - sizeof(bmp_info_header_t) - sizeof(uint32_t) - sizeof(head) ;
+    while (remaining--)
+        fgetc(rh->file);
+
+    VS_LOG(mtDebug, "check_bmp: width=%d height=%d bpp=%d align=%d offset=%d flip_v=%d",
+        info.width, info.height, info.bits_per_pixel,
+        rh->row_adjust, rh->off_header, rh->flip_v);
+
 
     return 0;
 }
@@ -636,15 +694,15 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
         { "P010",      2, 2, 2, 2, 0, { 0, 1, 2, 9 }, pfYUV420P16, write_px1x_frame    },
         { "P016",      2, 2, 2, 2, 0, { 0, 1, 2, 9 }, pfYUV420P16, write_px1x_frame    },
 
-        { "YUY2",      2, 2, 1, 2, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
-        { "YUYV",      2, 2, 1, 2, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
-        { "YUYV422",   2, 2, 1, 2, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
-        { "YVYU",      2, 2, 1, 2, 0, { 0, 2, 0, 1 }, pfYUV422P8,  write_packed_yuv422 },
-        { "YVYU422",   2, 2, 1, 2, 0, { 0, 2, 0, 1 }, pfYUV422P8,  write_packed_yuv422 },
-        { "UYVY",      2, 2, 1, 2, 0, { 1, 0, 2, 0 }, pfYUV422P8,  write_packed_yuv422 },
-        { "UYVY422",   2, 2, 1, 2, 0, { 1, 0, 2, 0 }, pfYUV422P8,  write_packed_yuv422 },
-        { "VYUY",      2, 2, 1, 2, 0, { 2, 0, 1, 0 }, pfYUV422P8,  write_packed_yuv422 },
-        { "VYUY422",   2, 2, 1, 2, 0, { 2, 0, 1, 0 }, pfYUV422P8,  write_packed_yuv422 },
+        { "YUY2",      2, 1, 1, 2, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
+        { "YUYV",      2, 1, 1, 2, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
+        { "YUYV422",   2, 1, 1, 2, 0, { 0, 1, 0, 2 }, pfYUV422P8,  write_packed_yuv422 },
+        { "YVYU",      2, 1, 1, 2, 0, { 0, 2, 0, 1 }, pfYUV422P8,  write_packed_yuv422 },
+        { "YVYU422",   2, 1, 1, 2, 0, { 0, 2, 0, 1 }, pfYUV422P8,  write_packed_yuv422 },
+        { "UYVY",      2, 1, 1, 2, 0, { 1, 0, 2, 0 }, pfYUV422P8,  write_packed_yuv422 },
+        { "UYVY422",   2, 1, 1, 2, 0, { 1, 0, 2, 0 }, pfYUV422P8,  write_packed_yuv422 },
+        { "VYUY",      2, 1, 1, 2, 0, { 2, 0, 1, 0 }, pfYUV422P8,  write_packed_yuv422 },
+        { "VYUY422",   2, 1, 1, 2, 0, { 2, 0, 1, 0 }, pfYUV422P8,  write_packed_yuv422 },
 
         { "P210",      2, 1, 2, 2, 0, { 0, 1, 2, 9 }, pfYUV422P16, write_px1x_frame    },
         { "P216",      2, 1, 2, 2, 0, { 0, 1, 2, 9 }, pfYUV422P16, write_px1x_frame    },
@@ -789,8 +847,8 @@ rs_get_frame(int n, int activation_reason, void **instance_data,
         if (rs_fseek(rh->file, rh->index[frame_number], SEEK_SET) != 0)
             return NULL;
     }
-    else if (rh->off_frame > 0) {
-        // pipe: read off frame header and discard
+    else if (rh->off_frame > 0 && !(n==0 && rh->skip_first_frame_header)) {
+        // pipe: read off frame header
         // todo: non-sequential access check
         if (rh->off_frame != fread(rh->frame_buff, 1, rh->off_frame, rh->file))
         {
