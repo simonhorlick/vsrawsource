@@ -24,10 +24,10 @@
 #
 
 input="$1"
-numFrames=3
+numFrames=10
 numPass=0
 numFail=0
-threads=1
+requests=1
 
 if [ -z $input ]; then
     echo "usage: $0 file"
@@ -50,13 +50,13 @@ do
     # first pass, checksum the source clip w/o raws
     # don't check the first line since it contains y4m XLENGTH comment which
     # for the pipe output is going to be INT32_MAX
-    srcSum=`vspipe --requests $threads --arg file_="$input" --arg format_=$fmt --y4m --end $numFrames source.vpy - | \
+    srcSum=`vspipe --requests $requests --arg file_="$input" --arg format_=$fmt --y4m --end $((numFrames-1)) source.vpy - | \
             tail -n +2 | \
             openssl md5`
     
     # second pass, same source clip piped through raws
-    echoSum=`vspipe --requests $threads --arg file_="$input" --arg format_=$fmt --y4m --end $numFrames source.vpy - | \
-            vspipe --requests $threads --y4m --end $numFrames echo-y4m.vpy - | \
+    echoSum=`vspipe --requests $requests --arg file_="$input" --arg format_=$fmt --y4m --end $((numFrames-1)) source.vpy - | \
+            vspipe --requests $requests --y4m --end $((numFrames-1)) echo-y4m.vpy - | \
             tail -n +2 | \
             openssl md5`
     
