@@ -59,6 +59,9 @@ struct rs_hndle {
     int has_alpha;
     int flip_v;                  // source should be flipped vertically
     int skip_first_frame_header; // first frame header was consumed in probe
+    char magic[2];               // first few bytes of file/stream to identify the file type
+    int  write_magic;            // 1 == magic needs to be written to the first frame out
+
     int64_t *index;
     uint64_t *total_pix;
     uint8_t *frame_buff;
@@ -493,7 +496,7 @@ static inline const char * VS_CC get_format(char *ctag)
 }
 static int VS_CC check_y4m(rs_hnd_t *rh, const VSAPI *vsapi)
 {
-    const char *stream_header = "YUV4MPEG2";
+    const char *stream_header = "YUV4MPEG2" + sizeof(rh->magic);
     const char *frame_header = "FRAME\n";
     size_t sh_length = strlen(stream_header);
     size_t fh_length = strlen(frame_header);
@@ -571,7 +574,8 @@ static int check_bmp(rs_hnd_t *rh, const VSAPI *vsapi)
 {
     uint32_t offset_data;
     bmp_info_header_t info = { 0 };
-    char head[10];
+
+    char head[10 - sizeof(rh->magic) ];
 
     if (sizeof(head) != fread(head, 1, sizeof(head), rh->file))
         return 1;
@@ -595,15 +599,9 @@ static int check_bmp(rs_hnd_t *rh, const VSAPI *vsapi)
     rh->flip_v = info.height > 0;   // +height means bmp is bottom-up, must be flipped
     rh->skip_first_frame_header = 1;// don't re-read the header when the first frame is requested
 
-    // read what's left to get to the first frame (padding after header? - did not see in testing)
-    int remaining = offset_data - sizeof(bmp_info_header_t) - sizeof(uint32_t) - sizeof(head) ;
-    while (remaining--)
-        fgetc(rh->file);
-
     VS_LOG(mtDebug, "check_bmp: width=%d height=%d bpp=%d align=%d offset=%d flip_v=%d",
         info.width, info.height, info.bits_per_pixel,
         rh->row_adjust, rh->off_header, rh->flip_v);
-
 
     return 0;
 }
@@ -611,21 +609,22 @@ static int check_bmp(rs_hnd_t *rh, const VSAPI *vsapi)
 
 static int check_header(rs_hnd_t *rh, const VSAPI *vsapi)
 {
-    // for pipes to work we can't seek; read the first 2 bytes and put back
-    // note: bmp only gives 2 bytes magic, no point in doing more
-    char head[3] = {0};
+    // read file magic to see what the file type is, if there is
+    // no recognized type then it is raw data
+    if (sizeof(rh->magic) != fread(rh->magic, 1, sizeof(rh->magic), rh->file))
+    {
+        VS_LOG(mtFatal, "check_header: fail to read file magic");
+        return 0;
+    }
 
-    head[0] = fgetc(rh->file);
-    head[1] = fgetc(rh->file);
-
-    ungetc(head[1], rh->file);
-    ungetc(head[0], rh->file);
-
-    if (strncmp("BM", head, 2) == 0)
+    if (strncmp("BM", rh->magic, 2) == 0)
         return check_bmp(rh, vsapi);
 
-    if (strncmp("YU", head, 2) == 0)
+    if (strncmp("YU", rh->magic, 2) == 0)
         return check_y4m(rh, vsapi);
+
+    // these bytes are part of the actual frame and need to be handled
+    rh->write_magic = 1;
 
     return 1;
 }
@@ -664,9 +663,9 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
         { "YUV420P10", 2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV420P10, write_planar_frame  },
         { "YUV420P16", 2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV420P16, write_planar_frame  },
 
-        // nv16, nv20
         { "NV12",      2, 2, 2, 1, 0, { 0, 1, 2, 9 }, pfYUV420P8,  write_nvxx_frame    },
         { "NV21",      2, 2, 2, 1, 0, { 0, 2, 1, 9 }, pfYUV420P8,  write_nvxx_frame    },
+
         { "P010",      2, 2, 2, 2, 0, { 0, 1, 2, 9 }, pfYUV420P16, write_px1x_frame    },
         { "P016",      2, 2, 2, 2, 0, { 0, 1, 2, 9 }, pfYUV420P16, write_px1x_frame    },
 
@@ -713,14 +712,21 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
         { "YUV444P8A", 1, 1, 4, 1, 1, { 0, 1, 2, 3 }, pfYUV444P8,  write_planar_frame  },
 
         { "BGR",       1, 1, 1, 3, 0, { 2, 1, 0, 9 }, pfRGB24,     write_packed_rgb24  },
+        { "BGR24",     1, 1, 1, 3, 0, { 2, 1, 0, 9 }, pfRGB24,     write_packed_rgb24  },
         { "RGB",       1, 1, 1, 3, 0, { 0, 1, 2, 9 }, pfRGB24,     write_packed_rgb24  },
+        { "RGB24",     1, 1, 1, 3, 0, { 0, 1, 2, 9 }, pfRGB24,     write_packed_rgb24  },
+
         { "BGRA",      1, 1, 1, 4, 1, { 2, 1, 0, 3 }, pfRGB24,     write_packed_rgb32  },
         { "ABGR",      1, 1, 1, 4, 1, { 3, 2, 1, 0 }, pfRGB24,     write_packed_rgb32  },
         { "RGBA",      1, 1, 1, 4, 1, { 0, 1, 2, 3 }, pfRGB24,     write_packed_rgb32  },
         { "ARGB",      1, 1, 1, 4, 1, { 3, 0, 1, 2 }, pfRGB24,     write_packed_rgb32  },
         { "AYUV",      1, 1, 1, 4, 1, { 3, 0, 1, 2 }, pfYUV444P8,  write_packed_rgb32  },
+
         { "GBRP8",     1, 1, 3, 1, 0, { 1, 2, 0, 9 }, pfRGB24,     write_planar_frame  },
+        { "GBRP",      1, 1, 3, 1, 0, { 1, 2, 0, 9 }, pfRGB24,     write_planar_frame  },
+        { "RGBP",      1, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfRGB24,     write_planar_frame  },
         { "RGBP8",     1, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfRGB24,     write_planar_frame  },
+
         { "GBRP9",     1, 1, 3, 2, 0, { 1, 2, 0, 9 }, pfRGB27,     write_planar_frame  },
         { "RGBP9",     1, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfRGB27,     write_planar_frame  },
         { "GBRP10",    1, 1, 3, 2, 0, { 1, 2, 0, 9 }, pfRGB30,     write_planar_frame  },
@@ -761,8 +767,9 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
     rh->write_frame = table[i].func;
     rh->has_alpha = table[i].has_alpha;
 
-    VS_LOG(mtDebug, "check_args: src_format=%s dst_format=%s width=%d height=%d frame_size=%d",
-        table[i].format_name, rh->vi[0].format->name, rh->vi[0].width, rh->vi[0].height, frame_size);
+    VS_LOG(mtDebug, "check_args: src_format=%s dst_format=%s size=%dx%d alpha=%d frame_size=%d off_header=%d off_frame=%d",
+        table[i].format_name, rh->vi[0].format->name, rh->vi[0].width, rh->vi[0].height, rh->has_alpha,
+        frame_size, rh->off_header, rh->off_frame);
 
     return NULL;
 }
@@ -808,11 +815,13 @@ rs_get_frame(int n, int activation_reason, void **instance_data,
              void **frame_data, VSFrameContext *frame_ctx, VSCore *core,
              const VSAPI *vsapi)
 {
-    if (activation_reason != arInitial) {
+    if (activation_reason != arInitial)
         return NULL;
-    }
 
     rs_hnd_t *rh = (rs_hnd_t *)*instance_data;
+
+    uint8_t* read_ptr = rh->frame_buff;
+    int read_len      = rh->frame_size;
 
     if (rh->index) {
         // file: seek to just after the frame header
@@ -828,16 +837,25 @@ rs_get_frame(int n, int activation_reason, void **instance_data,
         // todo: non-sequential access check
         if (rh->off_frame != fread(rh->frame_buff, 1, rh->off_frame, rh->file))
         {
-            VS_LOG(mtWarning, "read frame header failed at frame %d", n);
+            VS_LOG(mtCritical, "read frame header failed at frame %d", n);
             return NULL;
         }
     }
-
-    if (fread(rh->frame_buff, 1, rh->frame_size, rh->file) < rh->frame_size)
+    else if (rh->off_frame == 0 && n == 0 && rh->write_magic)
     {
-         VS_LOG(mtWarning, "read frame failed at frame %d", n);
+        // pipe: first frame needs to include magic bytes
+        int len = sizeof(rh->magic);
+        memcpy(read_ptr, rh->magic, len);
+        read_ptr += len;
+        read_len -= len;
+    }
+    
+    if (fread(read_ptr, 1, read_len, rh->file) < read_len)
+    {
+         VS_LOG(mtCritical, "read frame failed at frame %d", n);
          return NULL;
     }
+
 
     VSFrameRef *dst[2];
     dst[0] = vsapi->newVideoFrame(rh->vi[0].format, rh->vi[0].width, rh->vi[0].height,
@@ -981,8 +999,14 @@ create_source(const VSMap *in, VSMap *out, void *user_data, VSCore *core,
             rh->vi[0].format->bytesPerSample == 1 ? pfGray8 : pfGray16;
         rh->vi[1].format = vsapi->getFormatPreset(pf, core);
     }
+
+    // nfNoCache because the system file cache is used
+    // nfMakeLinear because disk drives are faster in sequential access
+    int flags = nfNoCache | nfMakeLinear;
+
+    // fmSerial if opening from a pipe, there is no seeking allowed
     vsapi->createFilter(in, out, "Source", vs_init, rs_get_frame, vs_close,
-                        fmSerial, 0, rh, core);
+                        fmUnordered, flags, rh, core);
 }
 #undef RET_IF_ERROR
 
