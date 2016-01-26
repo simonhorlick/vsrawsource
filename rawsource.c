@@ -35,14 +35,14 @@
 
 #define VS_LOG(level, ...) \
 {\
-    char msg_buff[256]={0}; \
-    int len = snprintf(msg_buff, sizeof(msg_buff)-1, LOG_PREFIX); \
-    snprintf(msg_buff+len, sizeof(msg_buff)-1-len, __VA_ARGS__); \
-    vsapi->logMessage(level, msg_buff);\
+    char _msg_buff[256]={0}; \
+    int _len = snprintf(_msg_buff, sizeof(_msg_buff)-1, LOG_PREFIX); \
+    snprintf(_msg_buff+_len, sizeof(_msg_buff)-1-_len, __VA_ARGS__); \
+    vsapi->logMessage(level, _msg_buff);\
 }
 
 typedef struct rs_hndle rs_hnd_t;
-typedef void (VS_CC *func_write_frame)(rs_hnd_t *, VSFrameRef **, const VSAPI *,
+typedef void (VS_CC *func_write_frame)(const rs_hnd_t *, VSFrameRef **, const VSAPI *,
                                        VSCore *);
 
 struct rs_hndle {
@@ -61,7 +61,7 @@ struct rs_hndle {
     int skip_first_frame_header; // first frame header was consumed in probe
     char magic[2];               // first few bytes of file/stream to identify the file type
     int  write_magic;            // 1 == magic needs to be written to the first frame out
-
+    int last_frame_number;       // last frame number requested to detect out-of-order problem
     int64_t *index;
     uint64_t *total_pix;
     uint8_t *frame_buff;
@@ -147,7 +147,7 @@ bitor8to32(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b3)
 
 
 static void VS_CC
-write_planar_frame(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
+write_planar_frame(const rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
                    VSCore *core)
 {
     uint8_t *srcp = rh->frame_buff;
@@ -183,7 +183,7 @@ write_planar_frame(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
 
 
 static void VS_CC
-write_nvxx_frame(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
+write_nvxx_frame(const rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
                  VSCore *core)
 {
     struct uv_t {
@@ -221,7 +221,7 @@ write_nvxx_frame(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
 
 
 static void VS_CC
-write_px1x_frame(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
+write_px1x_frame(const rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
                  VSCore *core)
 {
     struct uv16_t {
@@ -256,7 +256,7 @@ write_px1x_frame(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
 
 
 static void VS_CC
-write_packed_rgb24(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
+write_packed_rgb24(const rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
                    VSCore *core)
 {
     struct rgb24_t {
@@ -298,7 +298,7 @@ write_packed_rgb24(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
 
 
 static void VS_CC
-write_packed_rgb48(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
+write_packed_rgb48(const rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
                    VSCore *core)
 {
     struct rgb48_t {
@@ -336,7 +336,7 @@ write_packed_rgb48(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
 
 
 static void VS_CC
-write_packed_rgb32(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
+write_packed_rgb32(const rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
                    VSCore *core)
 {
     struct rgb32_t {
@@ -348,7 +348,7 @@ write_packed_rgb32(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
     int row_size = (rh->vi[0].width + 3) >> 2;
     int height = rh->vi[0].height;
 
-    int *order = rh->order;
+    const int *order = rh->order;
 
     dst[1] = vsapi->newVideoFrame(rh->vi[1].format, rh->vi[1].width,
                                   rh->vi[1].height, NULL, core);
@@ -386,7 +386,7 @@ write_packed_rgb32(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
 
 
 static void VS_CC
-write_packed_yuv422(rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
+write_packed_yuv422(const rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
                     VSCore *core)
 {
     struct packed422_t {
@@ -818,7 +818,16 @@ rs_get_frame(int n, int activation_reason, void **instance_data,
     if (activation_reason != arInitial)
         return NULL;
 
-    rs_hnd_t *rh = (rs_hnd_t *)*instance_data;
+    const rs_hnd_t *rh = (const rs_hnd_t *)*instance_data;
+
+    // pipe: detect out-of-order frame requests, which are possible
+    // if vspipe --requests > 1
+    static int next_frame_number = 0;
+    if (!rh->index && n != next_frame_number)
+        VS_LOG(mtCritical, "seeking a pipe is unsupported: need frame %d, requested %d",
+            next_frame_number, n);
+    next_frame_number = n+1;
+
 
     uint8_t* read_ptr = rh->frame_buff;
     int read_len      = rh->frame_size;
@@ -969,6 +978,7 @@ create_source(const VSMap *in, VSMap *out, void *user_data, VSCore *core,
 
     rh->row_adjust--;
     if (rh->row_adjust < 0 || rh->row_adjust > 15) {
+        VS_LOG(mtWarning, "invalid rowbytes_align requested, setting to 0");
         rh->row_adjust = 0;
     }
 
@@ -1004,7 +1014,8 @@ create_source(const VSMap *in, VSMap *out, void *user_data, VSCore *core,
     // nfMakeLinear because disk drives are faster in sequential access
     int flags = nfNoCache | nfMakeLinear;
 
-    // fmSerial if opening from a pipe, there is no seeking allowed
+    // fmUnordered since get_frame isn't reentrant; even for the non-pipe case,
+    // the same rh->frame_buff will be used to service parallel requests
     vsapi->createFilter(in, out, "Source", vs_init, rs_get_frame, vs_close,
                         fmUnordered, flags, rh, core);
 }
