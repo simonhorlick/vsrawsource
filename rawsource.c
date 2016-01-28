@@ -646,19 +646,19 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
         func_write_frame func;
     } table[] = {
         { "YUV9",      4, 4, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV410P8,  write_planar_frame  },
-        { "YVU9",      4, 4, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV410P8,  write_planar_frame  },
         { "YUV410P",   4, 4, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV410P8,  write_planar_frame  },
         { "YUV410P8",  4, 4, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV410P8,  write_planar_frame  },
+        { "YVU9",      4, 4, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV410P8,  write_planar_frame  },
 
         { "YUV411P",   4, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV411P8,  write_planar_frame  },
         { "YUV411P8",  4, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV411P8,  write_planar_frame  },
-        { "YV411",     4, 1, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV444P8,  write_planar_frame  },
+        { "YV411",     4, 1, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV411P8,  write_planar_frame  },
 
         { "i420",      2, 2, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV420P8,  write_planar_frame  },
         { "IYUV",      2, 2, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV420P8,  write_planar_frame  },
-        { "YV12",      2, 2, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV420P8,  write_planar_frame  },
         { "YUV420P",   2, 2, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV420P8,  write_planar_frame  },
         { "YUV420P8",  2, 2, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV420P8,  write_planar_frame  },
+        { "YV12",      2, 2, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV420P8,  write_planar_frame  },
         { "YUV420P9",  2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV420P9,  write_planar_frame  },
         { "YUV420P10", 2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV420P10, write_planar_frame  },
         { "YUV420P16", 2, 2, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV420P16, write_planar_frame  },
@@ -702,9 +702,9 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
         { "GRAYS",     1, 1, 1, 4, 0, { 0, 9, 9, 9 }, pfGrayS,     write_planar_frame  },
 
         { "i444",      1, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV444P8,  write_planar_frame  },
-        { "YV24",      1, 1, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV444P8,  write_planar_frame  },
         { "YUV444P",   1, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV444P8,  write_planar_frame  },
         { "YUV444P8",  1, 1, 3, 1, 0, { 0, 1, 2, 9 }, pfYUV444P8,  write_planar_frame  },
+        { "YV24",      1, 1, 3, 1, 0, { 0, 2, 1, 9 }, pfYUV444P8,  write_planar_frame  },
         { "YUV444P9",  1, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV444P9,  write_planar_frame  },
         { "YUV444P10", 1, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV444P10, write_planar_frame  },
         { "YUV444P16", 1, 1, 3, 2, 0, { 0, 1, 2, 9 }, pfYUV444P16, write_planar_frame  },
