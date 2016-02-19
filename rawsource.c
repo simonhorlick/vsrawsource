@@ -44,6 +44,13 @@
 typedef struct rs_hndle rs_hnd_t;
 typedef void (VS_CC *func_write_frame)(const rs_hnd_t *, VSFrameRef **, const VSAPI *,
                                        VSCore *);
+typedef struct rs_history_t rs_history_t;
+
+struct rs_history_t {
+    VSFrameRef* frame;
+    int frameNumber;
+    rs_history_t* next;
+};
 
 struct rs_hndle {
     FILE *file;
@@ -67,6 +74,7 @@ struct rs_hndle {
     uint8_t *frame_buff;
     func_write_frame write_frame;
     VSVideoInfo vi[2];
+    rs_history_t* history[2];
 };
 
 
@@ -809,6 +817,68 @@ vs_init(VSMap *in, VSMap *out, void **instance_data, VSNode *node,
     vsapi->setVideoInfo(rh->vi, rh->has_alpha + 1, node);
 }
 
+static void
+history_free(rs_history_t* node, const VSAPI *vsapi)
+{
+    if (node->next)
+        history_free(node->next, vsapi);
+
+    vsapi->freeFrame(node->frame);
+    free(node);
+}
+
+static void
+history_add(rs_hnd_t* rh, int frameNumber, const VSFrameRef* frame, int index, const VSAPI *vsapi, VSCore* core)
+{
+    // note: before this is called we already determined frame
+    // was *not* in the history, no check for that here
+
+    rs_history_t* h = (rs_history_t*)calloc(1, sizeof(*rh->history));
+    h->frameNumber = frameNumber;
+    h->frame = vsapi->copyFrame(frame, core);
+
+    if (rh->history[index])
+    {
+        rs_history_t* node = rh->history[index];
+        int length = 1;
+        while (node->next)
+        {
+            length++;
+            node = node->next;
+        }
+        node->next = h;
+
+        if (length > 10)
+        {
+            rs_history_t* del = rh->history[index];
+            rh->history[index] = del->next;
+            del->next = NULL;
+            history_free(del, vsapi);
+        }
+    }
+    else
+    {
+        rh->history[index] = h;
+    }
+}
+
+static VSFrameRef* history_get(const rs_hnd_t* rh, int frameNumber, int index)
+{
+    VSFrameRef* frame = NULL;
+
+    rs_history_t* node = rh->history[index];
+    while (node)
+    {
+        if (node->frameNumber == frameNumber)
+        {
+            frame = node->frame;
+            break;
+        }
+        node = node->next;
+    }
+
+    return frame;
+}
 
 static const VSFrameRef * VS_CC
 rs_get_frame(int n, int activation_reason, void **instance_data,
@@ -820,63 +890,76 @@ rs_get_frame(int n, int activation_reason, void **instance_data,
 
     const rs_hnd_t *rh = (const rs_hnd_t *)*instance_data;
 
-    // pipe: detect out-of-order frame requests, which are possible
-    // if vspipe --requests > 1
-    static int next_frame_number = 0;
-    if (!rh->index && n != next_frame_number)
-        VS_LOG(mtCritical, "seeking a pipe is unsupported: need frame %d, requested %d",
-            next_frame_number, n);
-    next_frame_number = n+1;
+    VSFrameRef *dst[2] = {NULL};
 
-
-    uint8_t* read_ptr = rh->frame_buff;
-    int read_len      = rh->frame_size;
-
-    if (rh->index) {
-        // file: seek to just after the frame header
-        int frame_number = n;
-        if (n >= rh->vi[0].numFrames)
-            frame_number = rh->vi[0].numFrames - 1;
-
-        if (rs_fseek(rh->file, rh->index[frame_number], SEEK_SET) != 0)
-            return NULL;
+    // try to get frame from history
+    for (int i = 0; i < 2; i++)
+    {
+        VSFrameRef* ref = history_get(rh, n, i);
+        if (ref)
+            dst[i] = vsapi->copyFrame(ref, core);
     }
-    else if (rh->off_frame > 0 && !(n==0 && rh->skip_first_frame_header)) {
-        // pipe: read off frame header
-        // todo: non-sequential access check
-        if (rh->off_frame != fread(rh->frame_buff, 1, rh->off_frame, rh->file))
-        {
-            VS_LOG(mtCritical, "read frame header failed at frame %d", n);
-            return NULL;
+
+    if (!dst[0])
+    {
+        // pipe: detect out-of-order frame requests, which are possible
+        // if vspipe --requests > 1
+        static int next_frame_number = 0;
+        if (!rh->index && n != next_frame_number)
+            VS_LOG(mtCritical, "seeking a pipe is unsupported: need frame %d, requested %d",
+                next_frame_number, n);
+        next_frame_number = n+1;
+
+
+        uint8_t* read_ptr = rh->frame_buff;
+        int read_len      = rh->frame_size;
+
+        if (rh->index) {
+            // file: seek to just after the frame header
+            int frame_number = n;
+            if (n >= rh->vi[0].numFrames)
+                frame_number = rh->vi[0].numFrames - 1;
+
+            if (rs_fseek(rh->file, rh->index[frame_number], SEEK_SET) != 0)
+                return NULL;
         }
+        else if (rh->off_frame > 0 && !(n==0 && rh->skip_first_frame_header)) {
+            // pipe: read off frame header
+            // todo: non-sequential access check
+            if (rh->off_frame != fread(rh->frame_buff, 1, rh->off_frame, rh->file))
+            {
+                VS_LOG(mtCritical, "read frame header failed at frame %d", n);
+                return NULL;
+            }
+        }
+        else if (rh->off_frame == 0 && n == 0 && rh->write_magic)
+        {
+            // pipe: first frame needs to include magic bytes
+            int len = sizeof(rh->magic);
+            memcpy(read_ptr, rh->magic, len);
+            read_ptr += len;
+            read_len -= len;
+        }
+
+        if (fread(read_ptr, 1, read_len, rh->file) < read_len)
+        {
+             VS_LOG(mtCritical, "read frame failed at frame %d", n);
+             return NULL;
+        }
+
+        dst[0] = vsapi->newVideoFrame(rh->vi[0].format, rh->vi[0].width, rh->vi[0].height,
+                                      NULL, core);
+
+        VSMap *props = vsapi->getFramePropsRW(dst[0]);
+        vsapi->propSetInt(props, "_DurationNum", rh->vi[0].fpsDen, paReplace);
+        vsapi->propSetInt(props, "_DurationDen", rh->vi[0].fpsNum, paReplace);
+        vsapi->propSetInt(props, "_SARNum", rh->sar_num, paReplace);
+        vsapi->propSetInt(props, "_SARDen", rh->sar_den, paReplace);
+
+        rh->write_frame(rh, dst, vsapi, core);
+
+        history_add(rh, n, dst[0], 0, vsapi, core);
     }
-    else if (rh->off_frame == 0 && n == 0 && rh->write_magic)
-    {
-        // pipe: first frame needs to include magic bytes
-        int len = sizeof(rh->magic);
-        memcpy(read_ptr, rh->magic, len);
-        read_ptr += len;
-        read_len -= len;
-    }
-    
-    if (fread(read_ptr, 1, read_len, rh->file) < read_len)
-    {
-         VS_LOG(mtCritical, "read frame failed at frame %d", n);
-         return NULL;
-    }
-
-
-    VSFrameRef *dst[2];
-    dst[0] = vsapi->newVideoFrame(rh->vi[0].format, rh->vi[0].width, rh->vi[0].height,
-                                  NULL, core);
-
-    VSMap *props = vsapi->getFramePropsRW(dst[0]);
-    vsapi->propSetInt(props, "_DurationNum", rh->vi[0].fpsDen, paReplace);
-    vsapi->propSetInt(props, "_DurationDen", rh->vi[0].fpsNum, paReplace);
-    vsapi->propSetInt(props, "_SARNum", rh->sar_num, paReplace);
-    vsapi->propSetInt(props, "_SARDen", rh->sar_den, paReplace);
-
-    rh->write_frame(rh, dst, vsapi, core);
 
     if (rh->has_alpha == 0) {
         return dst[0];
@@ -888,11 +971,13 @@ rs_get_frame(int n, int activation_reason, void **instance_data,
     }
 
     vsapi->freeFrame(dst[0]);
-    props = vsapi->getFramePropsRW(dst[1]);
+    VSMap* props = vsapi->getFramePropsRW(dst[1]);
     vsapi->propSetInt(props, "_DurationNum", rh->vi[1].fpsDen, paReplace);
     vsapi->propSetInt(props, "_DurationDen", rh->vi[1].fpsNum, paReplace);
     vsapi->propSetInt(props, "_SARNum", rh->sar_num, paReplace);
     vsapi->propSetInt(props, "_SARDen", rh->sar_den, paReplace);
+
+    history_add(rh, n, dst[1], 1, vsapi, core);
 
     return dst[1];
 }
@@ -988,7 +1073,8 @@ create_source(const VSMap *in, VSMap *out, void *user_data, VSCore *core,
     if (rh->file_size < 0)
     {
         // pipe: make the source "infinite"
-        rh->vi[0].numFrames = INT32_MAX;
+        // note: INT32_MAX doesn't work with some plugins (MVTools), use large number
+        rh->vi[0].numFrames = 30*60*60*6;
         rh->index = NULL;
     }
     else
