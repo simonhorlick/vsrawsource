@@ -39,11 +39,14 @@
 #pragma warning(disable:4996)
 #define rs_fseek _fseeki64
 #define rs_ftell _ftelli64
-#define snprintf _snprintf
 #define strcasecmp stricmp
+#define S_IFIFO _S_IFIFO
 #endif
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
+
+
 
 #include <stdio.h>
 
@@ -57,13 +60,7 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <stdarg.h>
-
-#ifdef __GNUC__
 #include <inttypes.h>
-#else
-#include <stdint.h>
-#define SCNi64 "lld"
-#endif
 
 typedef struct {
     uint32_t header_size;

@@ -49,11 +49,11 @@ How to compile:
     $ ./configure
     $ make
 
-    if you want to use msvc++, then
+    if you want to use vs2015 then
 
-    - rename rawsource.c to rawsource.cpp
-    - create vcxproj yourself
+    - create a an empty dll
+    - add rawsource.c
 
 source code:
 ------------
-    https://github.com/chikuzen/vsrawsource
+    https://github.com/walisser/vsrawsource
