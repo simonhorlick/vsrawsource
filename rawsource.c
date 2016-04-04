@@ -105,7 +105,7 @@ static const char *open_source_file(rs_hnd_t *rh, const char *src_name)
 
     // if file is a pipe, give it negative size as an indicator
     if (st.st_size == 0) {
-        if (S_ISFIFO(st.st_mode))
+        if ((st.st_mode & S_IFMT) == S_IFIFO)
             rh->file_size = -1;
         else
             return "failed to get file size.";
@@ -168,7 +168,7 @@ write_planar_frame(const rs_hnd_t *rh, VSFrameRef **dst, const VSAPI *vsapi,
         row_size = (row_size + rh->row_adjust) & (~rh->row_adjust);
         height = vsapi->getFrameHeight(dst[0], plane);
 
-        if ( ((int)(srcp - rh->frame_buff) + row_size*height) > rh->frame_size) {
+        if ( ((srcp - rh->frame_buff) + row_size*height) > (int) rh->frame_size) {
             VS_LOG(mtCritical, "write_planar_frame: buffer overflow, check format parameters");
             return;
         }
@@ -517,7 +517,7 @@ static int VS_CC check_y4m(rs_hnd_t *rh, const VSAPI *vsapi)
     if (strncmp(buff, stream_header, sh_length) != 0)
         return 1;
 
-    int i;
+    size_t i;
     for (i = sh_length; buff[i] != '\n'; i++) {
         if (!strncmp(buff + i, " W", 2)) {
             PARSE_HEADER(rh->vi[0].width < 1, "%d", &rh->vi[0].width);
@@ -558,8 +558,8 @@ static int VS_CC check_y4m(rs_hnd_t *rh, const VSAPI *vsapi)
         }
     }
 
-    rh->off_header = ++i;
-    rh->off_frame = fh_length;
+    rh->off_header = (int)++i;
+    rh->off_frame = (int)fh_length;
 
     if (strlen(rh->src_format) == 0) {
         VS_LOG(mtWarning, "check_y4m: assuming the format is YUV420P8");
@@ -608,7 +608,7 @@ static int check_bmp(rs_hnd_t *rh, const VSAPI *vsapi)
     rh->skip_first_frame_header = 1;// don't re-read the header when the first frame is requested
 
     VS_LOG(mtDebug, "check_bmp: width=%d height=%d bpp=%d align=%d offset=%d flip_v=%d",
-        info.width, info.height, info.bits_per_pixel,
+        (int)info.width, (int)info.height, (int)info.bits_per_pixel,
         rh->row_adjust, rh->off_header, rh->flip_v);
 
     return 0;
@@ -776,7 +776,7 @@ static const char * VS_CC check_args(rs_hnd_t *rh, vs_args_t *va)
     rh->has_alpha = table[i].has_alpha;
 
     VS_LOG(mtDebug, "check_args: src_format=%s dst_format=%s size=%dx%d alpha=%d frame_size=%d off_header=%d off_frame=%d",
-        table[i].format_name, rh->vi[0].format->name, rh->vi[0].width, rh->vi[0].height, rh->has_alpha,
+        table[i].format_name, &rh->vi[0].format->name, rh->vi[0].width, rh->vi[0].height, rh->has_alpha,
         frame_size, rh->off_header, rh->off_frame);
 
     return NULL;
@@ -888,7 +888,7 @@ rs_get_frame(int n, int activation_reason, void **instance_data,
     if (activation_reason != arInitial)
         return NULL;
 
-    const rs_hnd_t *rh = (const rs_hnd_t *)*instance_data;
+    rs_hnd_t *rh = (rs_hnd_t *)*instance_data;
 
     VSFrameRef *dst[2] = {NULL};
 
@@ -912,7 +912,7 @@ rs_get_frame(int n, int activation_reason, void **instance_data,
 
 
         uint8_t* read_ptr = rh->frame_buff;
-        int read_len      = rh->frame_size;
+        size_t read_len      = rh->frame_size;
 
         if (rh->index) {
             // file: seek to just after the frame header
