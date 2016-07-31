@@ -89,6 +89,17 @@ typedef struct {
 
 static const char *open_source_file(rs_hnd_t *rh, const char *src_name)
 {
+    // if name is -, use stdin
+    if (strcmp(src_name, "-") == 0)
+    {
+        // reopen stdin in binary mode in case it wasn't
+        if (!freopen(NULL, "rb", stdin))
+            return "failed to open source file stdin in binary mode";
+        rh->file = stdin;
+        rh->file_size = -1;
+        return NULL;
+    }
+
 #ifdef _WIN32
     struct _stat64 st;
     wchar_t tmp[FILENAME_MAX * 4];
@@ -96,11 +107,11 @@ static const char *open_source_file(rs_hnd_t *rh, const char *src_name)
 
     if (_wstat64(tmp, &st) != 0) {
 #else
-    struct stat st;
 
+    struct stat st;
     if (stat(src_name, &st) != 0) {
 #endif
-    return "source does not exist.";
+        return "source does not exist.";
     }
 
     // if file is a pipe, give it negative size as an indicator
