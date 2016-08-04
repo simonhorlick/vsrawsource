@@ -29,7 +29,7 @@
 #ifndef VS_RAW_SOURCE_H
 #define VS_RAW_SOURCE_H
 
-#define VS_RAWS_VERSION "0.3.4"
+#define VS_RAWS_VERSION "0.3.5"
 
 #ifdef _WIN32
 #ifdef __MINGW32__
@@ -42,8 +42,12 @@
 #define strcasecmp stricmp
 #define S_IFIFO _S_IFIFO
 #endif
+#define WINVER       0x0500
+#define _WIN32_WINNT 0x0500
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <io.h>       /* _setmode() */
+#include <fcntl.h>    /* _O_BINARY */
 #endif
 
 
