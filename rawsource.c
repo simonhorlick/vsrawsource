@@ -92,9 +92,10 @@ static const char *open_source_file(rs_hnd_t *rh, const char *src_name)
     // if name is -, use stdin
     if (strcmp(src_name, "-") == 0)
     {
-        // reopen stdin in binary mode in case it wasn't
-        if (!freopen(NULL, "rb", stdin))
-            return "failed to open source file stdin in binary mode";
+#ifdef _WIN32
+        // reopen stdin in binary mode in case it wasn't, probably only windows issue
+        _setmode(_fileno(stdin),  _O_BINARY);
+#endif
         rh->file = stdin;
         rh->file_size = -1;
         return NULL;
