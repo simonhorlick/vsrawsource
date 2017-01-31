@@ -8,8 +8,9 @@ fmt = fmt_.decode('utf8').split(':')
 width   = int(fmt[0])
 height  = int(fmt[1])
 src_fmt = fmt[2]
-dst_fmt = eval('vs.%s' % fmt[3])
-swap_rgb = int(fmt[4])
+#dst_fmt = eval('vs.%s' % fmt[3])
+swap_rgb = int(fmt[3])
+swap_uv = int(fmt[4])
 align = 1
 
 source = core.raws.Source(
@@ -27,6 +28,9 @@ if type(source) is list:
 if swap_rgb and source.format.color_family == vs.RGB:
     source = core.std.ShufflePlanes(source, [1, 2, 0], colorfamily=vs.RGB)
 
-source = core.resize.Bicubic(source, format=dst_fmt)
+if swap_uv and source.format.color_family == vs.YUV:
+    source = core.std.ShufflePlanes(source, [0, 2, 1], colorfamily=vs.YUV)
+
+#source = core.resize.Bicubic(source, format=dst_fmt)
 
 source.set_output()

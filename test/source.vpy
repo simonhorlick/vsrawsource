@@ -7,7 +7,7 @@ formatCode = eval('vs.%s' % format_.decode('utf-8'))
 # get the core instance
 core = vs.get_core()
 
-core.std.LoadPlugin('/usr/local/lib/libffms2.so')
+#core.std.LoadPlugin('/usr/local/lib/libffms2.so')
 
 source = core.ffms2.Source(source=filePath)
 

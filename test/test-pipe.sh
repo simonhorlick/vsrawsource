@@ -137,7 +137,7 @@ do
 
     # second pass, same source clip piped through raws
     echoSum=`ffmpeg -loglevel warning  -i "$input" -frames $numFrames -pix_fmt $packedFmt -f rawvideo - | \
-            vspipe --requests $requests --end $(($numFrames-1)) --arg fmt_=$width:$height:$packedFmt:1:0 echo-raw.vpy - | \
+            vspipe --requests $requests --end $(($numFrames-1)) --arg fmt_=$width:$height:$packedFmt:0:0 echo-raw.vpy - | \
             openssl md5`
 
     compare "$srcSum" "$echoSum"
@@ -188,7 +188,7 @@ do
     # second pass, same source clip piped through raws
     echoSum=`ffmpeg -loglevel warning -i "$input" -frames $numFrames -pix_fmt bgr24 -c:v bmp -f rawvideo - | \
             ffmpeg -loglevel warning -i - -frames $numFrames -pix_fmt $packedFmt -f rawvideo - | \
-            vspipe --requests $requests --end $(($numFrames-1)) --arg fmt_=$width:$height:$packedFmt:1:0 echo-raw.vpy - | \
+            vspipe --requests $requests --end $(($numFrames-1)) --arg fmt_=$width:$height:$packedFmt:0:0 echo-raw.vpy - | \
             openssl md5`
 
     compare "$srcSum" "$echoSum"
@@ -197,11 +197,13 @@ done
 # test planar rgb formats vspipe can output
 # ffmpeg(rgb) | vspipe(RGBXX) == ffmpeg(rgb) | vspipe(RGBXX) | vspipe(fmt)
 for fmt in \
-    rgbp,RGB24 rgbp9,RGB27 rgbp10,RGB30 rgbp16,RGB48
+    gbrp,RGB24 gbrp9,RGB27 gbrp10,RGB30 gbrp16,RGB48
 do
     split $fmt
     fmt=$_1
     srcFmt=$_2
+
+    echo -e \\n== $srcFmt ===============================
 
     srcSum=`ffmpeg -loglevel warning -i "$input" -frames $numFrames -pix_fmt bgr24 -f rawvideo - |
             vspipe --requests $requests --end $(($numFrames-1)) --arg fmt_=$width:$height:bgr24:$srcFmt:0 convert-raw.vpy - | \
@@ -239,7 +241,7 @@ do
     echoSum=`ffmpeg -loglevel warning -i "$input" -frames $numFrames -pix_fmt bgr24 -f rawvideo - | \
             vspipe --requests $requests --end $(($numFrames-1))  --arg fmt_=$width:$height:BGR:$vsInFmt:1 convert-raw.vpy - | \
             ffmpeg -loglevel warning -f rawvideo -video_size ${width}x${height} -pixel_format $vsOutFmt -i - -pix_fmt $testFmt -f rawvideo - | \
-            vspipe --requests $requests --end $(($numFrames-1)) --arg fmt_=$width:$height:$testFmt:1:0 echo-raw.vpy - | \
+            vspipe --requests $requests --end $(($numFrames-1)) --arg fmt_=$width:$height:$testFmt:0:0 echo-raw.vpy - | \
             openssl md5`
 
     compare "$srcSum" "$echoSum"
@@ -264,8 +266,8 @@ do
             openssl md5`
 
     echoSum=`ffmpeg -loglevel warning -i "$input" -frames $numFrames -pix_fmt $swapped -f rawvideo - | \
-            vspipe --requests $requests --end $(($numFrames-1)) --arg fmt_=$width:$height:$swapped:1:1 echo-raw.vpy - | \
-            vspipe --requests $requests --end $(($numFrames-1)) --arg fmt_=$width:$height:$fmt:1:0 echo-raw.vpy - | \
+            vspipe --requests $requests --end $(($numFrames-1)) --arg fmt_=$width:$height:$swapped:0:1 echo-raw.vpy - | \
+            vspipe --requests $requests --end $(($numFrames-1)) --arg fmt_=$width:$height:$fmt:0:0 echo-raw.vpy - | \
             openssl md5`
 
     compare "$srcSum" "$echoSum"
