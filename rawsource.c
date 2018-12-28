@@ -860,7 +860,7 @@ history_add(rs_hnd_t* rh, int frameNumber, const VSFrameRef* frame, int index, c
         }
         node->next = h;
 
-        if (length > 10)
+        if (length > 16)
         {
             rs_history_t* del = rh->history[index];
             rh->history[index] = del->next;
